@@ -2,6 +2,162 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { verifyAdmin } from '@/lib/auth'
 
+const TARGET_QUERY_COUNT = 18
+const CONCURRENCY_LIMIT = 4
+const REQUEST_TIMEOUT_MS = 45000
+
+const ALLOWED_TYPES = ['competition', 'program', 'internship', 'scholarship', 'volunteer', 'research', 'workshop', 'other']
+
+// ─── 工具函数 ────────────────────────────────────────────────────────────────
+
+function normalizeUrl(url: string): string {
+  try {
+    const u = new URL(url.toLowerCase().trim())
+    u.hash = ''
+    u.search = [...u.searchParams.entries()]
+      .filter(([k]) => !k.startsWith('utm_'))
+      .reduce((acc, [k, v]) => { acc.set(k, v); return acc }, new URLSearchParams())
+      .toString()
+    let href = u.origin + u.pathname.replace(/\/+$/, '')
+    if (u.search) href += '?' + u.search
+    return href
+  } catch {
+    return url.toLowerCase().trim().replace(/\/+$/, '')
+  }
+}
+
+function normalizeTitle(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ').trim()
+}
+
+function isValidOpportunity(obj: any): boolean {
+  if (!obj || typeof obj !== 'object') return false
+  if (!obj.title || typeof obj.title !== 'string' || !obj.title.trim()) return false
+  if (!obj.organization || typeof obj.organization !== 'string' || !obj.organization.trim()) return false
+  if (!obj.website_url || typeof obj.website_url !== 'string') return false
+  if (!/^https?:\/\/.+/.test(obj.website_url.trim())) return false
+  if (!ALLOWED_TYPES.includes(obj.type)) return false
+  if (!Array.isArray(obj.grade_levels) || obj.grade_levels.length === 0) return false
+  if (!Array.isArray(obj.fields)) return false
+  if (!Array.isArray(obj.search_keywords)) return false
+  return true
+}
+
+async function runWithConcurrencyLimit<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = []
+  let index = 0
+
+  async function runNext(): Promise<void> {
+    if (index >= items.length) return
+    const current = index++
+    results[current] = await worker(items[current])
+    await runNext()
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => runNext())
+  await Promise.all(workers)
+  return results
+}
+
+async function fetchClaudeResultsForQuery(query: string): Promise<{ results: any[], success: boolean }> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY!,
+        'anthropic-version': '2023-06-01',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4000,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        messages: [{
+          role: 'user',
+          content: `You are curating a database of extracurricular opportunities for U.S. high school students (grades 9–12).
+
+Use web_search to find opportunities related to: "${query}"
+
+Find 5–8 REAL, specific programs, competitions, internships, scholarships, or research opportunities. Follow these rules strictly:
+
+INCLUDE:
+- Official program pages (university, nonprofit, government, company)
+- Official competition or scholarship pages
+- Programs that clearly state they accept high school students
+
+EXCLUDE:
+- Blog posts, listicles, or third-party roundups
+- Vague directory pages or aggregator sites
+- Programs where it's unclear if high school students are eligible
+- Anything without a real, working official URL
+- Programs outside the United States (unless explicitly open to US students nationally)
+
+If you are not sure whether a program is suitable for high school students, do NOT include it.
+If deadline or start_date is unknown, return null — do not guess.
+
+Return ONLY a raw JSON array. Each object must have exactly these fields:
+- title: string (exact official program name)
+- description: string (2–3 sentences, factual)
+- organization: string (official name)
+- website_url: string (direct official URL, not a redirect or list page)
+- type: one of ["competition","program","internship","scholarship","volunteer","research","workshop","other"]
+- fields: array from ["STEM","Leadership","Journalism","Arts","Business","Community Service","Environment","Medicine","Law","Technology","College Prep","Social Justice"]
+- grade_levels: array from ["9","10","11","12"]
+- cost: one of ["free","paid","financial_aid_available"]
+- cost_amount: string or null
+- location_type: one of ["online","in_person","hybrid"]
+- location: string or null
+- requirements: string
+- deadline: "YYYY-MM-DD" or null
+- start_date: "YYYY-MM-DD" or null
+- duration: string or null
+- search_keywords: ["${query}"]
+
+Return ONLY the JSON array. No markdown, no explanation, no preamble.`
+        }]
+      })
+    })
+
+    clearTimeout(timer)
+    const claudeData = await response.json()
+    if (claudeData.error) {
+      console.error(`Claude error for "${query}":`, claudeData.error.message)
+      return { results: [], success: false }
+    }
+
+    let jsonText = ''
+    for (const block of claudeData.content || []) {
+      if (block.type === 'text') jsonText += block.text
+    }
+    jsonText = jsonText.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim()
+
+    const startIdx = jsonText.indexOf('[')
+    const endIdx = jsonText.lastIndexOf(']')
+    if (startIdx === -1 || endIdx === -1) return { results: [], success: false }
+
+    const parsed = JSON.parse(jsonText.slice(startIdx, endIdx + 1))
+    const valid = parsed.filter(isValidOpportunity)
+    return { results: valid, success: true }
+
+  } catch (err: any) {
+    clearTimeout(timer)
+    if (err.name === 'AbortError') {
+      console.error(`Timeout for query: "${query}"`)
+    } else {
+      console.error(`Failed for query "${query}":`, err)
+    }
+    return { results: [], success: false }
+  }
+}
+
 function randomPick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
 }
@@ -21,6 +177,8 @@ function buildQuery(
     default: return `${field || ''} ${type || ''} high school`.trim()
   }
 }
+
+// ─── 主处理函数 ──────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   const admin = verifyAdmin(req)
@@ -50,7 +208,7 @@ export async function POST(req: NextRequest) {
 
     const used = new Set<string>()
     let attempts = 0
-    while (searchQueries.length < 5 && attempts < 50) {
+    while (searchQueries.length < TARGET_QUERY_COUNT && attempts < TARGET_QUERY_COUNT * 5) {
       attempts++
       const inst = Math.random() > 0.3 ? randomPick(instList) : null
       const loc = Math.random() > 0.4 ? randomPick(locList) : null
@@ -67,7 +225,7 @@ export async function POST(req: NextRequest) {
       .from('keywords').select('keyword').eq('active', true)
     if (!keywords?.length) return NextResponse.json({ error: 'No keywords found' }, { status: 400 })
     const shuffled = keywords.map(k => k.keyword).sort(() => Math.random() - 0.5)
-    searchQueries = shuffled.slice(0, 5)
+    searchQueries = shuffled.slice(0, TARGET_QUERY_COUNT)
   }
 
   const { data: log } = await supabaseAdmin
@@ -75,86 +233,58 @@ export async function POST(req: NextRequest) {
     .insert({ triggered_by: admin.username, keywords_searched: searchQueries, status: 'running' })
     .select().single()
 
-  let allOpportunities: any[] = []
+  let queriesSucceeded = 0
+  let queriesFailed = 0
 
   try {
-    for (const query of searchQueries) {
-      try {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': process.env.ANTHROPIC_API_KEY!,
-            'anthropic-version': '2023-06-01',
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 4000,
-            tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-            messages: [{
-              role: 'user',
-              content: `You are building a database of extracurricular opportunities for high school students across the United States.
-
-Use web_search to find real opportunities related to: "${query}"
-
-Find 3-5 REAL, specific programs, competitions, internships, or scholarships for high school students. Each must have a real, working website URL. Do NOT make up programs.
-
-Return ONLY a raw JSON array. Each object must have exactly these fields:
-- title: string (exact program name)
-- description: string (2-3 sentences)
-- organization: string
-- website_url: string (real URL)
-- type: one of ["competition","program","internship","scholarship","volunteer","research","workshop","other"]
-- fields: array from ["STEM","Leadership","Journalism","Arts","Business","Community Service","Environment","Medicine","Law","Technology","College Prep","Social Justice"]
-- grade_levels: array from ["9","10","11","12"]
-- cost: one of ["free","paid","financial_aid_available"]
-- cost_amount: string or null
-- location_type: one of ["online","in_person","hybrid"]
-- location: string or null
-- requirements: string
-- deadline: string "YYYY-MM-DD" or null
-- start_date: string "YYYY-MM-DD" or null
-- duration: string or null
-- search_keywords: ["${query}"]
-
-Return ONLY the JSON array, no markdown.`
-            }]
-          })
-        })
-
-        const claudeData = await response.json()
-        if (claudeData.error) { console.error(`Error for "${query}":`, claudeData.error.message); continue }
-
-        let jsonText = ''
-        for (const block of claudeData.content || []) {
-          if (block.type === 'text') jsonText += block.text
-        }
-        jsonText = jsonText.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim()
-
-        const startIdx = jsonText.indexOf('[')
-        const endIdx = jsonText.lastIndexOf(']')
-        if (startIdx === -1 || endIdx === -1) continue
-
-        const batchOpps = JSON.parse(jsonText.slice(startIdx, endIdx + 1))
-        allOpportunities = allOpportunities.concat(batchOpps)
-
-        await new Promise(resolve => setTimeout(resolve, 1500))
-      } catch (queryErr) {
-        console.error(`Failed for "${query}":`, queryErr)
-        continue
+    // 并发跑所有query，限制并发数为4
+    const batchResults = await runWithConcurrencyLimit(
+      searchQueries,
+      CONCURRENCY_LIMIT,
+      async (query) => {
+        const { results, success } = await fetchClaudeResultsForQuery(query)
+        if (success) queriesSucceeded++
+        else queriesFailed++
+        return results
       }
-    }
+    )
 
+    let allOpportunities = batchResults.flat()
+
+    // ── 第一层去重：本次结果内部去重 ──
+    const seenUrls = new Set<string>()
+    const seenTitles = new Set<string>()
+    allOpportunities = allOpportunities.filter(opp => {
+      const url = normalizeUrl(opp.website_url)
+      const title = normalizeTitle(opp.title)
+      const key = `${url}||${title}`
+      if (seenUrls.has(url) || seenTitles.has(title)) return false
+      seenUrls.add(url)
+      seenTitles.add(title)
+      return true
+    })
+
+    // ── 第二层去重：与数据库已有记录比对 ──
+    const { data: existingRecords } = await supabaseAdmin
+      .from('opportunities')
+      .select('website_url, title')
+
+    const existingUrls = new Set((existingRecords || []).map(r => normalizeUrl(r.website_url)))
+    const existingTitles = new Set((existingRecords || []).map(r => normalizeTitle(r.title)))
+
+    allOpportunities = allOpportunities.filter(opp => {
+      const url = normalizeUrl(opp.website_url)
+      const title = normalizeTitle(opp.title)
+      return !existingUrls.has(url) && !existingTitles.has(title)
+    })
+
+    // ── 插入数据库 ──
     let inserted = 0
     for (const opp of allOpportunities) {
-      if (!opp.website_url) continue
-      const { data: existing } = await supabaseAdmin
-        .from('opportunities').select('id').eq('website_url', opp.website_url).limit(1)
-      if (existing && existing.length > 0) continue
-
       const { ai_confidence, ...oppData } = opp
       const { error } = await supabaseAdmin.from('opportunities').insert({
         ...oppData,
+        website_url: opp.website_url.trim(),
         status: 'pending',
         ai_notes: `Query: "${opp.search_keywords?.[0] || ''}" | ${new Date().toLocaleDateString()}`
       })
@@ -162,10 +292,21 @@ Return ONLY the JSON array, no markdown.`
     }
 
     await supabaseAdmin.from('search_logs')
-      .update({ status: 'completed', opportunities_found: inserted, completed_at: new Date().toISOString() })
+      .update({
+        status: 'completed',
+        opportunities_found: inserted,
+        completed_at: new Date().toISOString()
+      })
       .eq('id', log?.id)
 
-    return NextResponse.json({ success: true, found: inserted, total_raw: allOpportunities.length, queries_used: searchQueries })
+    return NextResponse.json({
+      success: true,
+      found: inserted,
+      total_raw: batchResults.flat().length,
+      queries_used: searchQueries.length,
+      queries_succeeded: queriesSucceeded,
+      queries_failed: queriesFailed,
+    })
 
   } catch (err: unknown) {
     await supabaseAdmin.from('search_logs')
