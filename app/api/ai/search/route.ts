@@ -2,32 +2,83 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { verifyAdmin } from '@/lib/auth'
 
+function randomPick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]
+}
+
+function buildQuery(
+  institution: string | null,
+  location: string | null,
+  field: string | null,
+  type: string | null
+): string {
+  const strategy = Math.floor(Math.random() * 4)
+  switch (strategy) {
+    case 0: return `${institution || ''} ${field || ''} ${type || ''} high school students`.trim()
+    case 1: return `${location || ''} ${field || ''} ${type || ''} high school`.trim()
+    case 2: return `${institution || ''} ${location || ''} ${type || ''} high school program`.trim()
+    case 3: return `${field || ''} ${type || ''} high school students nationwide`.trim()
+    default: return `${field || ''} ${type || ''} high school`.trim()
+  }
+}
+
 export async function POST(req: NextRequest) {
   const admin = verifyAdmin(req)
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  // 获取所有活跃关键词
-  const { data: keywords } = await supabaseAdmin
-    .from('keywords')
-    .select('keyword')
-    .eq('active', true)
+  const [
+    { data: institutions },
+    { data: locations },
+    { data: fields },
+    { data: types }
+  ] = await Promise.all([
+    supabaseAdmin.from('dim_institutions').select('name').eq('active', true),
+    supabaseAdmin.from('dim_locations').select('name').eq('active', true),
+    supabaseAdmin.from('dim_fields').select('term').eq('active', true),
+    supabaseAdmin.from('dim_types').select('term').eq('active', true),
+  ])
 
-  if (!keywords?.length) return NextResponse.json({ error: 'No keywords found' }, { status: 400 })
+  const useDimensions = (institutions?.length ?? 0) > 0
 
-  // 随机打乱，每次取不同的关键词，避免重复搜同一批
-  const shuffled = keywords.map(k => k.keyword).sort(() => Math.random() - 0.5)
-  const selectedKeywords = shuffled.slice(0, 5) // 每次取5个关键词
+  let searchQueries: string[] = []
+
+  if (useDimensions) {
+    const instList = institutions!.map(i => i.name)
+    const locList = locations!.map(l => l.name)
+    const fieldList = fields!.map(f => f.term)
+    const typeList = types!.map(t => t.term)
+
+    const used = new Set<string>()
+    let attempts = 0
+    while (searchQueries.length < 5 && attempts < 50) {
+      attempts++
+      const inst = Math.random() > 0.3 ? randomPick(instList) : null
+      const loc = Math.random() > 0.4 ? randomPick(locList) : null
+      const field = randomPick(fieldList)
+      const type = randomPick(typeList)
+      const q = buildQuery(inst, loc, field, type)
+      if (!used.has(q)) {
+        used.add(q)
+        searchQueries.push(q)
+      }
+    }
+  } else {
+    const { data: keywords } = await supabaseAdmin
+      .from('keywords').select('keyword').eq('active', true)
+    if (!keywords?.length) return NextResponse.json({ error: 'No keywords found' }, { status: 400 })
+    const shuffled = keywords.map(k => k.keyword).sort(() => Math.random() - 0.5)
+    searchQueries = shuffled.slice(0, 5)
+  }
 
   const { data: log } = await supabaseAdmin
     .from('search_logs')
-    .insert({ triggered_by: admin.username, keywords_searched: selectedKeywords, status: 'running' })
+    .insert({ triggered_by: admin.username, keywords_searched: searchQueries, status: 'running' })
     .select().single()
 
   let allOpportunities: any[] = []
 
   try {
-    // 每个关键词单独搜索一次，结果累积
-    for (const keyword of selectedKeywords) {
+    for (const query of searchQueries) {
       try {
         const response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
@@ -39,56 +90,46 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             model: 'claude-sonnet-4-6',
             max_tokens: 4000,
-            tools: [
-              {
-                type: 'web_search_20250305',
-                name: 'web_search',
-              }
-            ],
+            tools: [{ type: 'web_search_20250305', name: 'web_search' }],
             messages: [{
               role: 'user',
               content: `You are building a database of extracurricular opportunities for high school students across the United States.
 
-Use web_search to find real opportunities related to: "${keyword}"
+Use web_search to find real opportunities related to: "${query}"
 
-Find 3-5 REAL, specific programs, competitions, internships, or scholarships for high school students. Each must have a real, working website URL.
+Find 3-5 REAL, specific programs, competitions, internships, or scholarships for high school students. Each must have a real, working website URL. Do NOT make up programs.
 
 Return ONLY a raw JSON array. Each object must have exactly these fields:
 - title: string (exact program name)
 - description: string (2-3 sentences)
 - organization: string
-- website_url: string (real URL you verified exists)
+- website_url: string (real URL)
 - type: one of ["competition","program","internship","scholarship","volunteer","research","workshop","other"]
 - fields: array from ["STEM","Leadership","Journalism","Arts","Business","Community Service","Environment","Medicine","Law","Technology","College Prep","Social Justice"]
 - grade_levels: array from ["9","10","11","12"]
 - cost: one of ["free","paid","financial_aid_available"]
 - cost_amount: string or null
 - location_type: one of ["online","in_person","hybrid"]
-- location: string or null (city/state if in_person)
+- location: string or null
 - requirements: string
 - deadline: string "YYYY-MM-DD" or null
 - start_date: string "YYYY-MM-DD" or null
 - duration: string or null
-- search_keywords: ["${keyword}"]
+- search_keywords: ["${query}"]
 
-Only include opportunities with verified, working URLs. Return ONLY the JSON array, no markdown.`
+Return ONLY the JSON array, no markdown.`
             }]
           })
         })
 
         const claudeData = await response.json()
-        if (claudeData.error) {
-          console.error(`Error for keyword "${keyword}":`, claudeData.error.message)
-          continue
-        }
+        if (claudeData.error) { console.error(`Error for "${query}":`, claudeData.error.message); continue }
 
         let jsonText = ''
         for (const block of claudeData.content || []) {
           if (block.type === 'text') jsonText += block.text
         }
-
-        jsonText = jsonText.trim()
-          .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim()
+        jsonText = jsonText.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim()
 
         const startIdx = jsonText.indexOf('[')
         const endIdx = jsonText.lastIndexOf(']')
@@ -97,11 +138,9 @@ Only include opportunities with verified, working URLs. Return ONLY the JSON arr
         const batchOpps = JSON.parse(jsonText.slice(startIdx, endIdx + 1))
         allOpportunities = allOpportunities.concat(batchOpps)
 
-        // 每个关键词之间等1秒，避免超速率限制
-        await new Promise(resolve => setTimeout(resolve, 1000))
-
-      } catch (keywordErr) {
-        console.error(`Failed for keyword "${keyword}":`, keywordErr)
+        await new Promise(resolve => setTimeout(resolve, 1500))
+      } catch (queryErr) {
+        console.error(`Failed for "${query}":`, queryErr)
         continue
       }
     }
@@ -109,22 +148,15 @@ Only include opportunities with verified, working URLs. Return ONLY the JSON arr
     let inserted = 0
     for (const opp of allOpportunities) {
       if (!opp.website_url) continue
-
-      // 用 URL 去重：所有状态都查（包括 rejected、dismissed）
       const { data: existing } = await supabaseAdmin
-        .from('opportunities')
-        .select('id')
-        .eq('website_url', opp.website_url)
-        .limit(1)
-
+        .from('opportunities').select('id').eq('website_url', opp.website_url).limit(1)
       if (existing && existing.length > 0) continue
 
       const { ai_confidence, ...oppData } = opp
-
       const { error } = await supabaseAdmin.from('opportunities').insert({
         ...oppData,
         status: 'pending',
-        ai_notes: `Found via AI search | keyword: "${opp.search_keywords?.[0] || 'unknown'}" | ${new Date().toLocaleDateString()}`
+        ai_notes: `Query: "${opp.search_keywords?.[0] || ''}" | ${new Date().toLocaleDateString()}`
       })
       if (!error) inserted++
     }
@@ -133,11 +165,7 @@ Only include opportunities with verified, working URLs. Return ONLY the JSON arr
       .update({ status: 'completed', opportunities_found: inserted, completed_at: new Date().toISOString() })
       .eq('id', log?.id)
 
-    await supabaseAdmin.from('keywords')
-      .update({ last_searched_at: new Date().toISOString() })
-      .in('keyword', selectedKeywords)
-
-    return NextResponse.json({ success: true, found: inserted, total_raw: allOpportunities.length, keywords_used: selectedKeywords })
+    return NextResponse.json({ success: true, found: inserted, total_raw: allOpportunities.length, queries_used: searchQueries })
 
   } catch (err: unknown) {
     await supabaseAdmin.from('search_logs')
