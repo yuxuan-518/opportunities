@@ -20,8 +20,8 @@ export async function POST(req: NextRequest) {
     .select().single()
 
   const selectedKeywords = keywords.slice(0, 16).map(k => k.keyword)
-  const batch1 = selectedKeywords.slice(0, 8)
-  const batch2 = selectedKeywords.slice(8, 16)
+  const batch1 = selectedKeywords.slice(0, 5)
+  const batch2: string[] = []
 
   let allOpportunities: any[] = []
 
