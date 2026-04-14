@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "app/api/ai/search/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/ai/verify/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}
