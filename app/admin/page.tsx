@@ -1,0 +1,421 @@
+'use client'
+import { useEffect, useState } from 'react'
+import { Opportunity, OPPORTUNITY_TYPES, FIELDS, GRADE_LEVELS } from '@/lib/types'
+
+type Tab = 'new' | 'review' | 'published' | 'rejected' | 'keywords'
+
+const COST_LABELS: Record<string, string> = { free: 'Free', paid: 'Paid', financial_aid_available: 'Aid Available' }
+const TYPE_COLORS: Record<string, string> = {
+  competition: '#e74c3c', program: '#3498db', internship: '#2ecc71',
+  scholarship: '#f39c12', volunteer: '#9b59b6', research: '#1abc9c',
+  workshop: '#e67e22', other: '#95a5a6'
+}
+
+export default function AdminPage() {
+  const [token, setToken] = useState<string | null>(null)
+  const [admin, setAdmin] = useState<{ username: string; display_name: string } | null>(null)
+  const [loginUser, setLoginUser] = useState('')
+  const [loginPass, setLoginPass] = useState('')
+  const [loginError, setLoginError] = useState('')
+  const [tab, setTab] = useState<Tab>('new')
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([])
+  const [loading, setLoading] = useState(false)
+  const [editing, setEditing] = useState<Opportunity | null>(null)
+  const [aiSearching, setAiSearching] = useState(false)
+  const [aiVerifying, setAiVerifying] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [keywords, setKeywords] = useState<{ id: string; keyword: string; category: string; active: boolean }[]>([])
+  const [newKeyword, setNewKeyword] = useState('')
+  const [newKeywordCat, setNewKeywordCat] = useState('general')
+
+  useEffect(() => {
+    const t = localStorage.getItem('admin_token')
+    const a = localStorage.getItem('admin_info')
+    if (t && a) { setToken(t); setAdmin(JSON.parse(a)) }
+  }, [])
+
+  useEffect(() => {
+    if (token) fetchOpportunities()
+  }, [token, tab])
+
+  const login = async () => {
+    setLoginError('')
+    const res = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: loginUser, password: loginPass })
+    })
+    const data = await res.json()
+    if (!res.ok) { setLoginError('Invalid username or password'); return }
+    localStorage.setItem('admin_token', data.token)
+    localStorage.setItem('admin_info', JSON.stringify(data.admin))
+    setToken(data.token)
+    setAdmin(data.admin)
+  }
+
+  const logout = () => {
+    localStorage.removeItem('admin_token')
+    localStorage.removeItem('admin_info')
+    setToken(null); setAdmin(null)
+  }
+
+  const authHeaders = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token}` })
+
+  const fetchOpportunities = async () => {
+    setLoading(true)
+    const statusMap: Record<Tab, string> = { new: 'pending', review: 'published', published: 'published', rejected: 'rejected', keywords: '' }
+    if (tab === 'keywords') {
+      const res = await fetch('/api/keywords', { headers: authHeaders() })
+      const data = await res.json()
+      setKeywords(Array.isArray(data) ? data : [])
+      setLoading(false)
+      return
+    }
+    let url = `/api/opportunities?status=${statusMap[tab]}`
+    if (tab === 'review') url += '&verification=needs_review'
+    const res = await fetch(url, { headers: authHeaders() })
+    const data = await res.json()
+    let filtered = Array.isArray(data) ? data : []
+    if (tab === 'review') filtered = filtered.filter((o: Opportunity) => o.verification_status === 'needs_review')
+    setOpportunities(filtered)
+    setLoading(false)
+  }
+
+  const updateStatus = async (id: string, status: string) => {
+    await fetch(`/api/opportunities/${id}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ status, reviewed_at: new Date().toISOString() })
+    })
+    showMsg(status === 'published' ? '✅ Published!' : status === 'rejected' ? '❌ Rejected' : '↩️ Moved to pending')
+    fetchOpportunities()
+  }
+
+  const saveEdit = async () => {
+    if (!editing) return
+    await fetch(`/api/opportunities/${editing.id}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify(editing)
+    })
+    setEditing(null)
+    showMsg('✅ Saved!')
+    fetchOpportunities()
+  }
+
+  const deleteOpp = async (id: string) => {
+    if (!confirm('Delete this opportunity?')) return
+    await fetch(`/api/opportunities/${id}`, { method: 'DELETE', headers: authHeaders() })
+    showMsg('🗑 Deleted')
+    fetchOpportunities()
+  }
+
+  const aiSearch = async () => {
+    setAiSearching(true)
+    const res = await fetch('/api/ai/search', { method: 'POST', headers: authHeaders() })
+    const data = await res.json()
+    setAiSearching(false)
+    if (data.found !== undefined) { showMsg(`🤖 AI found ${data.found} new opportunities!`); if (tab === 'new') fetchOpportunities() }
+    else showMsg('❌ AI search failed: ' + data.error)
+  }
+
+  const aiVerify = async () => {
+    setAiVerifying(true)
+    const res = await fetch('/api/ai/verify', { method: 'POST', headers: authHeaders() })
+    const data = await res.json()
+    setAiVerifying(false)
+    if (data.checked !== undefined) { showMsg(`🔍 Verified ${data.checked} opportunities, found ${data.issues} issues`); fetchOpportunities() }
+    else showMsg('❌ Verification failed: ' + data.error)
+  }
+
+  const toggleKeyword = async (id: string, active: boolean) => {
+    await fetch(`/api/keywords/${id}`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ active }) })
+    fetchOpportunities()
+  }
+
+  const addKeyword = async () => {
+    if (!newKeyword.trim()) return
+    await fetch('/api/keywords', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ keyword: newKeyword.trim(), category: newKeywordCat }) })
+    setNewKeyword('')
+    fetchOpportunities()
+  }
+
+  const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
+
+  if (!token) return (
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1a1a2e, #0f3460)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+      <div style={{ background: 'white', borderRadius: 16, padding: 40, width: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        <h1 style={{ margin: '0 0 6px', fontSize: 24, fontWeight: 700, color: '#1a1a2e' }}>Admin Login</h1>
+        <p style={{ margin: '0 0 28px', color: '#666', fontSize: 14 }}>Opportunities & Programs</p>
+        <input value={loginUser} onChange={e => setLoginUser(e.target.value)} placeholder="Username"
+          style={{ width: '100%', padding: '12px 14px', borderRadius: 8, border: '1px solid #ddd', fontSize: 15, marginBottom: 12, boxSizing: 'border-box', outline: 'none' }} />
+        <input value={loginPass} onChange={e => setLoginPass(e.target.value)} type="password" placeholder="Password"
+          onKeyDown={e => e.key === 'Enter' && login()}
+          style={{ width: '100%', padding: '12px 14px', borderRadius: 8, border: '1px solid #ddd', fontSize: 15, marginBottom: 16, boxSizing: 'border-box', outline: 'none' }} />
+        {loginError && <p style={{ color: '#e74c3c', fontSize: 13, marginBottom: 12 }}>{loginError}</p>}
+        <button onClick={login} style={{ width: '100%', padding: 13, background: '#0f3460', color: 'white', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>Login</button>
+        <a href="/" style={{ display: 'block', textAlign: 'center', marginTop: 16, color: '#666', fontSize: 13, textDecoration: 'none' }}>← Back to student view</a>
+      </div>
+    </div>
+  )
+
+  const tabConfig = [
+    { id: 'new', label: '📥 New Reviews', desc: 'AI-found, pending approval' },
+    { id: 'review', label: '⚠️ Needs Review', desc: 'Flagged by AI verification' },
+    { id: 'published', label: '✅ Published', desc: 'Live on student page' },
+    { id: 'rejected', label: '❌ Rejected', desc: 'Declined opportunities' },
+    { id: 'keywords', label: '🔑 Keywords', desc: 'Manage search keywords' },
+  ]
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f0f2f5', fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+      {/* Header */}
+      <div style={{ background: '#1a1a2e', color: 'white', padding: '0 24px' }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <span style={{ fontSize: 20, fontWeight: 700 }}>⚙️ Admin Panel</span>
+            <span style={{ opacity: 0.5, fontSize: 14 }}>|</span>
+            <span style={{ opacity: 0.7, fontSize: 14 }}>Opportunities & Programs</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <span style={{ opacity: 0.7, fontSize: 14 }}>👤 {admin?.display_name || admin?.username}</span>
+            <button onClick={aiSearch} disabled={aiSearching}
+              style={{ padding: '8px 14px', background: aiSearching ? '#555' : '#2ecc71', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: aiSearching ? 'default' : 'pointer', fontWeight: 600 }}>
+              {aiSearching ? '🤖 Searching...' : '🤖 AI Search'}
+            </button>
+            <button onClick={aiVerify} disabled={aiVerifying}
+              style={{ padding: '8px 14px', background: aiVerifying ? '#555' : '#3498db', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: aiVerifying ? 'default' : 'pointer', fontWeight: 600 }}>
+              {aiVerifying ? '🔍 Verifying...' : '🔍 AI Verify'}
+            </button>
+            <a href="/" style={{ padding: '8px 14px', background: 'rgba(255,255,255,0.1)', color: 'white', borderRadius: 8, fontSize: 13, textDecoration: 'none' }}>Student View</a>
+            <button onClick={logout} style={{ padding: '8px 14px', background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Logout</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ background: 'white', borderBottom: '1px solid #e0e0e0', padding: '0 24px' }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', gap: 4 }}>
+          {tabConfig.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id as Tab)}
+              style={{ padding: '16px 20px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 14, fontWeight: tab === t.id ? 700 : 400,
+                color: tab === t.id ? '#0f3460' : '#666', borderBottom: tab === t.id ? '3px solid #0f3460' : '3px solid transparent' }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Toast */}
+      {msg && (
+        <div style={{ position: 'fixed', top: 80, right: 24, background: '#1a1a2e', color: 'white', padding: '12px 20px', borderRadius: 10, zIndex: 9999, fontSize: 14, fontWeight: 600 }}>
+          {msg}
+        </div>
+      )}
+
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 24 }}>
+        {/* Keywords tab */}
+        {tab === 'keywords' && (
+          <div>
+            <div style={{ background: 'white', borderRadius: 12, padding: 20, marginBottom: 20, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Add New Keyword</h3>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)} placeholder="Enter search keyword..."
+                  style={{ flex: 1, padding: '10px 14px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, outline: 'none' }} />
+                <select value={newKeywordCat} onChange={e => setNewKeywordCat(e.target.value)}
+                  style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, outline: 'none' }}>
+                  {['general','STEM','Medicine','Leadership','Journalism','Business','Arts','Law','Environment','Community Service','Competition','College Prep'].map(c =>
+                    <option key={c} value={c}>{c}</option>)}
+                </select>
+                <button onClick={addKeyword} style={{ padding: '10px 20px', background: '#0f3460', color: 'white', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 600 }}>Add</button>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+              {keywords.map(k => (
+                <div key={k.id} style={{ background: 'white', borderRadius: 10, padding: '12px 16px', boxShadow: '0 2px 6px rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', opacity: k.active ? 1 : 0.5 }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e' }}>{k.keyword}</div>
+                    <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{k.category}</div>
+                  </div>
+                  <button onClick={() => toggleKeyword(k.id, !k.active)}
+                    style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #ddd', background: k.active ? '#e8f8e8' : '#f5f5f5', color: k.active ? '#27ae60' : '#999', fontSize: 12, cursor: 'pointer' }}>
+                    {k.active ? 'Active' : 'Inactive'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Opportunities list */}
+        {tab !== 'keywords' && (
+          loading ? <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>Loading...</div> :
+          opportunities.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 60, background: 'white', borderRadius: 12, color: '#999' }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>
+                {tab === 'new' ? '📭' : tab === 'review' ? '✅' : '📋'}
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>
+                {tab === 'new' ? 'No pending reviews' : tab === 'review' ? 'No issues found' : 'Nothing here yet'}
+              </div>
+              {tab === 'new' && <div style={{ fontSize: 14, marginTop: 8 }}>Click "AI Search" to find new opportunities</div>}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {opportunities.map(opp => (
+                <div key={opp.id} style={{ background: 'white', borderRadius: 12, padding: 20, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', border: opp.verification_status === 'needs_review' ? '2px solid #f39c12' : '1px solid #f0f0f0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                        <span style={{ background: TYPE_COLORS[opp.type]||'#95a5a6', color: 'white', padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600 }}>{OPPORTUNITY_TYPES[opp.type]}</span>
+                        <span style={{ background: '#f0f4ff', color: '#3498db', padding: '2px 10px', borderRadius: 20, fontSize: 11 }}>{COST_LABELS[opp.cost]}</span>
+                        {opp.ai_confidence > 0 && <span style={{ background: '#f0fff4', color: '#27ae60', padding: '2px 10px', borderRadius: 20, fontSize: 11 }}>AI {opp.ai_confidence}% confident</span>}
+                        {opp.verification_status === 'needs_review' && <span style={{ background: '#fff8e1', color: '#f39c12', padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600 }}>⚠️ Needs Review</span>}
+                      </div>
+                      <h3 style={{ margin: '0 0 4px', fontSize: 17, fontWeight: 700, color: '#1a1a2e' }}>{opp.title}</h3>
+                      {opp.organization && <p style={{ margin: '0 0 8px', fontSize: 13, color: '#666' }}>🏛 {opp.organization}</p>}
+                      <p style={{ margin: '0 0 8px', fontSize: 13, color: '#555', lineHeight: 1.5 }}>{opp.description}</p>
+                      <div style={{ display: 'flex', gap: 16, fontSize: 12, color: '#888', flexWrap: 'wrap' }}>
+                        {opp.deadline && <span>📅 Deadline: {new Date(opp.deadline).toLocaleDateString()}</span>}
+                        {opp.website_url && <a href={opp.website_url} target="_blank" rel="noopener noreferrer" style={{ color: '#3498db' }}>🔗 Website</a>}
+                        {opp.fields.length > 0 && <span>🏷 {opp.fields.join(', ')}</span>}
+                        {opp.grade_levels.length > 0 && <span>👤 Grades: {opp.grade_levels.join(', ')}</span>}
+                      </div>
+                      {opp.verification_notes && (
+                        <div style={{ marginTop: 10, padding: '8px 12px', background: '#fff8e1', borderRadius: 6, fontSize: 12, color: '#856404' }}>
+                          ⚠️ AI Note: {opp.verification_notes}
+                        </div>
+                      )}
+                      {opp.ai_notes && (
+                        <div style={{ marginTop: 6, padding: '8px 12px', background: '#f0f4ff', borderRadius: 6, fontSize: 12, color: '#3498db' }}>
+                          🤖 {opp.ai_notes}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 120 }}>
+                      {tab === 'new' && <>
+                        <button onClick={() => updateStatus(opp.id, 'published')} style={{ padding: '8px 16px', background: '#27ae60', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>✅ Publish</button>
+                        <button onClick={() => setEditing(opp)} style={{ padding: '8px 16px', background: '#3498db', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>✏️ Edit</button>
+                        <button onClick={() => updateStatus(opp.id, 'rejected')} style={{ padding: '8px 16px', background: '#e74c3c', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>❌ Reject</button>
+                      </>}
+                      {tab === 'review' && <>
+                        <button onClick={() => setEditing(opp)} style={{ padding: '8px 16px', background: '#3498db', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>✏️ Edit & Fix</button>
+                        <button onClick={() => updateStatus(opp.id, 'rejected')} style={{ padding: '8px 16px', background: '#e74c3c', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>❌ Remove</button>
+                      </>}
+                      {tab === 'published' && <>
+                        <button onClick={() => setEditing(opp)} style={{ padding: '8px 16px', background: '#3498db', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>✏️ Edit</button>
+                        <button onClick={() => updateStatus(opp.id, 'rejected')} style={{ padding: '8px 16px', background: '#e74c3c', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Remove</button>
+                      </>}
+                      {tab === 'rejected' && <>
+                        <button onClick={() => updateStatus(opp.id, 'pending')} style={{ padding: '8px 16px', background: '#95a5a6', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>↩️ Restore</button>
+                        <button onClick={() => deleteOpp(opp.id)} style={{ padding: '8px 16px', background: '#c0392b', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>🗑 Delete</button>
+                      </>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+      </div>
+
+      {/* Edit Modal */}
+      {editing && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'white', borderRadius: 16, maxWidth: 700, width: '100%', maxHeight: '90vh', overflow: 'auto', padding: 32 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Edit Opportunity</h2>
+              <button onClick={() => setEditing(null)} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#666' }}>×</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {[
+                { label: 'Title *', key: 'title', type: 'text' },
+                { label: 'Organization', key: 'organization', type: 'text' },
+                { label: 'Website URL', key: 'website_url', type: 'text' },
+                { label: 'Deadline (YYYY-MM-DD)', key: 'deadline', type: 'text' },
+                { label: 'Duration', key: 'duration', type: 'text' },
+                { label: 'Location', key: 'location', type: 'text' },
+                { label: 'Cost Amount', key: 'cost_amount', type: 'text' },
+              ].map(({ label, key, type }) => (
+                <div key={key}>
+                  <label style={{ fontSize: 12, color: '#666', fontWeight: 600, display: 'block', marginBottom: 4, textTransform: 'uppercase' }}>{label}</label>
+                  <input type={type} value={(editing as unknown as Record<string, string>)[key] || ''}
+                    onChange={e => setEditing({ ...editing, [key]: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', outline: 'none' }} />
+                </div>
+              ))}
+              <div>
+                <label style={{ fontSize: 12, color: '#666', fontWeight: 600, display: 'block', marginBottom: 4, textTransform: 'uppercase' }}>Description</label>
+                <textarea value={editing.description || ''} onChange={e => setEditing({ ...editing, description: e.target.value })} rows={3}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', outline: 'none', resize: 'vertical' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: '#666', fontWeight: 600, display: 'block', marginBottom: 4, textTransform: 'uppercase' }}>Requirements</label>
+                <textarea value={editing.requirements || ''} onChange={e => setEditing({ ...editing, requirements: e.target.value })} rows={2}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', outline: 'none', resize: 'vertical' }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12, color: '#666', fontWeight: 600, display: 'block', marginBottom: 4, textTransform: 'uppercase' }}>Type</label>
+                  <select value={editing.type} onChange={e => setEditing({ ...editing, type: e.target.value as Opportunity['type'] })}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, outline: 'none' }}>
+                    {Object.entries(OPPORTUNITY_TYPES).map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: '#666', fontWeight: 600, display: 'block', marginBottom: 4, textTransform: 'uppercase' }}>Cost</label>
+                  <select value={editing.cost} onChange={e => setEditing({ ...editing, cost: e.target.value as Opportunity['cost'] })}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, outline: 'none' }}>
+                    <option value="free">Free</option>
+                    <option value="paid">Paid</option>
+                    <option value="financial_aid_available">Aid Available</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: '#666', fontWeight: 600, display: 'block', marginBottom: 4, textTransform: 'uppercase' }}>Location Type</label>
+                  <select value={editing.location_type} onChange={e => setEditing({ ...editing, location_type: e.target.value as Opportunity['location_type'] })}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, outline: 'none' }}>
+                    <option value="online">Online</option>
+                    <option value="in_person">In Person</option>
+                    <option value="hybrid">Hybrid</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: '#666', fontWeight: 600, display: 'block', marginBottom: 8, textTransform: 'uppercase' }}>Fields</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {FIELDS.map(f => (
+                    <button key={f} onClick={() => setEditing({ ...editing, fields: editing.fields.includes(f) ? editing.fields.filter(x => x !== f) : [...editing.fields, f] })}
+                      style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid #ddd', fontSize: 12, cursor: 'pointer', background: editing.fields.includes(f) ? '#3498db' : 'white', color: editing.fields.includes(f) ? 'white' : '#666' }}>
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: '#666', fontWeight: 600, display: 'block', marginBottom: 8, textTransform: 'uppercase' }}>Grade Levels</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {GRADE_LEVELS.map(g => (
+                    <button key={g} onClick={() => setEditing({ ...editing, grade_levels: editing.grade_levels.includes(g) ? editing.grade_levels.filter(x => x !== g) : [...editing.grade_levels, g] })}
+                      style={{ padding: '6px 16px', borderRadius: 20, border: '1px solid #ddd', fontSize: 13, cursor: 'pointer', background: editing.grade_levels.includes(g) ? '#0f3460' : 'white', color: editing.grade_levels.includes(g) ? 'white' : '#666' }}>
+                      Grade {g}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: '#666', fontWeight: 600, display: 'block', marginBottom: 4, textTransform: 'uppercase' }}>Admin Notes</label>
+                <textarea value={editing.admin_notes || ''} onChange={e => setEditing({ ...editing, admin_notes: e.target.value })} rows={2}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, boxSizing: 'border-box', outline: 'none', resize: 'vertical' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+              <button onClick={saveEdit} style={{ flex: 1, padding: 13, background: '#27ae60', color: 'white', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>Save Changes</button>
+              <button onClick={() => setEditing(null)} style={{ padding: '13px 20px', background: '#f5f5f5', color: '#666', border: 'none', borderRadius: 10, fontSize: 15, cursor: 'pointer' }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
