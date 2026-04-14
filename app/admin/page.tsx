@@ -63,7 +63,9 @@ export default function AdminPage() {
 
   const fetchOpportunities = async () => {
     setLoading(true)
-    const statusMap: Record<Tab, string> = { new: 'pending', review: 'published', published: 'published', rejected: 'rejected', keywords: '' }
+    const statusMap: Record<Tab, string> = {
+      new: 'pending', review: 'published', published: 'published', rejected: 'rejected', keywords: ''
+    }
     if (tab === 'keywords') {
       const res = await fetch('/api/keywords', { headers: authHeaders() })
       const data = await res.json()
@@ -87,7 +89,13 @@ export default function AdminPage() {
       headers: authHeaders(),
       body: JSON.stringify({ status, reviewed_at: new Date().toISOString() })
     })
-    showMsg(status === 'published' ? '✅ Published!' : status === 'rejected' ? '❌ Rejected' : '↩️ Moved to pending')
+    const msgs: Record<string, string> = {
+      published: '✅ Published!',
+      rejected: '❌ Rejected (permanent)',
+      dismissed: '🔄 Dismissed (will reappear in future searches)',
+      pending: '↩️ Moved to pending'
+    }
+    showMsg(msgs[status] || '✅ Done')
     fetchOpportunities()
   }
 
@@ -104,7 +112,7 @@ export default function AdminPage() {
   }
 
   const deleteOpp = async (id: string) => {
-    if (!confirm('Delete this opportunity?')) return
+    if (!confirm('Permanently delete this opportunity?')) return
     await fetch(`/api/opportunities/${id}`, { method: 'DELETE', headers: authHeaders() })
     showMsg('🗑 Deleted')
     fetchOpportunities()
@@ -115,8 +123,12 @@ export default function AdminPage() {
     const res = await fetch('/api/ai/search', { method: 'POST', headers: authHeaders() })
     const data = await res.json()
     setAiSearching(false)
-    if (data.found !== undefined) { showMsg(`🤖 AI found ${data.found} new opportunities!`); if (tab === 'new') fetchOpportunities() }
-    else showMsg('❌ AI search failed: ' + data.error)
+    if (data.found !== undefined) {
+      showMsg(`🤖 AI found ${data.found} new opportunities!`)
+      if (tab === 'new') fetchOpportunities()
+    } else {
+      showMsg('❌ AI search failed: ' + data.error)
+    }
   }
 
   const aiVerify = async () => {
@@ -124,8 +136,12 @@ export default function AdminPage() {
     const res = await fetch('/api/ai/verify', { method: 'POST', headers: authHeaders() })
     const data = await res.json()
     setAiVerifying(false)
-    if (data.checked !== undefined) { showMsg(`🔍 Verified ${data.checked} opportunities, found ${data.issues} issues`); fetchOpportunities() }
-    else showMsg('❌ Verification failed: ' + data.error)
+    if (data.checked !== undefined) {
+      showMsg(`🔍 Verified ${data.checked} opportunities, found ${data.issues} issues`)
+      fetchOpportunities()
+    } else {
+      showMsg('❌ Verification failed: ' + data.error)
+    }
   }
 
   const toggleKeyword = async (id: string, active: boolean) => {
@@ -140,7 +156,7 @@ export default function AdminPage() {
     fetchOpportunities()
   }
 
-  const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
+  const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 4000) }
 
   if (!token) return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1a1a2e, #0f3460)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
@@ -163,7 +179,7 @@ export default function AdminPage() {
     { id: 'new', label: '📥 New Reviews', desc: 'AI-found, pending approval' },
     { id: 'review', label: '⚠️ Needs Review', desc: 'Flagged by AI verification' },
     { id: 'published', label: '✅ Published', desc: 'Live on student page' },
-    { id: 'rejected', label: '❌ Rejected', desc: 'Declined opportunities' },
+    { id: 'rejected', label: '❌ Rejected', desc: 'Permanently declined' },
     { id: 'keywords', label: '🔑 Keywords', desc: 'Manage search keywords' },
   ]
 
@@ -208,7 +224,7 @@ export default function AdminPage() {
 
       {/* Toast */}
       {msg && (
-        <div style={{ position: 'fixed', top: 80, right: 24, background: '#1a1a2e', color: 'white', padding: '12px 20px', borderRadius: 10, zIndex: 9999, fontSize: 14, fontWeight: 600 }}>
+        <div style={{ position: 'fixed', top: 80, right: 24, background: '#1a1a2e', color: 'white', padding: '12px 20px', borderRadius: 10, zIndex: 9999, fontSize: 14, fontWeight: 600, maxWidth: 320 }}>
           {msg}
         </div>
       )}
@@ -269,7 +285,6 @@ export default function AdminPage() {
                       <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                         <span style={{ background: TYPE_COLORS[opp.type]||'#95a5a6', color: 'white', padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600 }}>{OPPORTUNITY_TYPES[opp.type]}</span>
                         <span style={{ background: '#f0f4ff', color: '#3498db', padding: '2px 10px', borderRadius: 20, fontSize: 11 }}>{COST_LABELS[opp.cost]}</span>
-                        {opp.ai_confidence > 0 && <span style={{ background: '#f0fff4', color: '#27ae60', padding: '2px 10px', borderRadius: 20, fontSize: 11 }}>AI {opp.ai_confidence}% confident</span>}
                         {opp.verification_status === 'needs_review' && <span style={{ background: '#fff8e1', color: '#f39c12', padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600 }}>⚠️ Needs Review</span>}
                       </div>
                       <h3 style={{ margin: '0 0 4px', fontSize: 17, fontWeight: 700, color: '#1a1a2e' }}>{opp.title}</h3>
@@ -292,23 +307,40 @@ export default function AdminPage() {
                         </div>
                       )}
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 120 }}>
+
+                    {/* Action buttons */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 140 }}>
                       {tab === 'new' && <>
-                        <button onClick={() => updateStatus(opp.id, 'published')} style={{ padding: '8px 16px', background: '#27ae60', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>✅ Publish</button>
-                        <button onClick={() => setEditing(opp)} style={{ padding: '8px 16px', background: '#3498db', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>✏️ Edit</button>
-                        <button onClick={() => updateStatus(opp.id, 'rejected')} style={{ padding: '8px 16px', background: '#e74c3c', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>❌ Reject</button>
+                        <button onClick={() => updateStatus(opp.id, 'published')}
+                          style={{ padding: '8px 16px', background: '#27ae60', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>✅ Publish</button>
+                        <button onClick={() => setEditing(opp)}
+                          style={{ padding: '8px 16px', background: '#3498db', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>✏️ Edit</button>
+                        <button onClick={() => updateStatus(opp.id, 'dismissed')}
+                          style={{ padding: '8px 16px', background: '#e67e22', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
+                          title="Info has issues, but program is real — AI can find it again later">🔄 Dismiss</button>
+                        <button onClick={() => updateStatus(opp.id, 'rejected')}
+                          style={{ padding: '8px 16px', background: '#e74c3c', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
+                          title="Permanently reject — AI will never show this again">❌ Reject</button>
                       </>}
                       {tab === 'review' && <>
-                        <button onClick={() => setEditing(opp)} style={{ padding: '8px 16px', background: '#3498db', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>✏️ Edit & Fix</button>
-                        <button onClick={() => updateStatus(opp.id, 'rejected')} style={{ padding: '8px 16px', background: '#e74c3c', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>❌ Remove</button>
+                        <button onClick={() => setEditing(opp)}
+                          style={{ padding: '8px 16px', background: '#3498db', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>✏️ Edit & Fix</button>
+                        <button onClick={() => updateStatus(opp.id, 'dismissed')}
+                          style={{ padding: '8px 16px', background: '#e67e22', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>🔄 Dismiss</button>
+                        <button onClick={() => updateStatus(opp.id, 'rejected')}
+                          style={{ padding: '8px 16px', background: '#e74c3c', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>❌ Remove</button>
                       </>}
                       {tab === 'published' && <>
-                        <button onClick={() => setEditing(opp)} style={{ padding: '8px 16px', background: '#3498db', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>✏️ Edit</button>
-                        <button onClick={() => updateStatus(opp.id, 'rejected')} style={{ padding: '8px 16px', background: '#e74c3c', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Remove</button>
+                        <button onClick={() => setEditing(opp)}
+                          style={{ padding: '8px 16px', background: '#3498db', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>✏️ Edit</button>
+                        <button onClick={() => updateStatus(opp.id, 'rejected')}
+                          style={{ padding: '8px 16px', background: '#e74c3c', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>❌ Remove</button>
                       </>}
                       {tab === 'rejected' && <>
-                        <button onClick={() => updateStatus(opp.id, 'pending')} style={{ padding: '8px 16px', background: '#95a5a6', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>↩️ Restore</button>
-                        <button onClick={() => deleteOpp(opp.id)} style={{ padding: '8px 16px', background: '#c0392b', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>🗑 Delete</button>
+                        <button onClick={() => updateStatus(opp.id, 'pending')}
+                          style={{ padding: '8px 16px', background: '#95a5a6', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>↩️ Restore</button>
+                        <button onClick={() => deleteOpp(opp.id)}
+                          style={{ padding: '8px 16px', background: '#c0392b', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>🗑 Delete</button>
                       </>}
                     </div>
                   </div>

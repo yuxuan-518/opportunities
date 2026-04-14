@@ -1,8 +1,7 @@
-export type OpportunityStatus = 'pending' | 'published' | 'rejected'
+export type OpportunityStatus = 'pending' | 'published' | 'rejected' | 'dismissed'
 export type VerificationStatus = 'unverified' | 'verified' | 'needs_review'
 export type CostType = 'free' | 'paid' | 'financial_aid_available'
 export type LocationType = 'online' | 'in_person' | 'hybrid'
-
 export type OpportunityType =
   | 'competition'
   | 'program'
@@ -14,14 +13,14 @@ export type OpportunityType =
   | 'other'
 
 export const OPPORTUNITY_TYPES: Record<OpportunityType, string> = {
-  competition: '竞赛',
-  program: '项目',
-  internship: '实习',
-  scholarship: '奖学金',
-  volunteer: '志愿者',
-  research: '科研',
-  workshop: '工作坊',
-  other: '其他',
+  competition: 'Competition',
+  program: 'Program',
+  internship: 'Internship',
+  scholarship: 'Scholarship',
+  volunteer: 'Volunteer',
+  research: 'Research',
+  workshop: 'Workshop',
+  other: 'Other',
 }
 
 export const FIELDS = [
@@ -60,7 +59,6 @@ export interface Opportunity {
   end_date: string | null
   duration: string | null
   status: OpportunityStatus
-  ai_confidence: number
   ai_notes: string | null
   search_keywords: string[]
   last_verified_at: string | null
