@@ -19,6 +19,7 @@ export default function HomePage() {
   const [filterGrade, setFilterGrade] = useState('')
   const [filterCost, setFilterCost] = useState('')
   const [filterLocation, setFilterLocation] = useState('')
+  const [filterOpenOnly, setFilterOpenOnly] = useState(false) // 新增：只看开放中
   const [selected, setSelected] = useState<Opportunity | null>(null)
 
   const fetchOpportunities = async () => {
@@ -33,17 +34,32 @@ export default function HomePage() {
     const data = await res.json()
     let filtered = Array.isArray(data) ? data : []
     if (filterLocation) filtered = filtered.filter((o: Opportunity) => o.location_type === filterLocation)
+    // 只看开放中：过滤掉截止日期已过的项目（没有截止日期的视为仍开放）
+    if (filterOpenOnly) {
+      const now = Date.now()
+      filtered = filtered.filter((o: Opportunity) => {
+        if (!o.deadline) return true // 没有截止日期 = 滚动申请，视为开放
+        return new Date(o.deadline).getTime() >= now
+      })
+    }
     setOpportunities(filtered)
     setLoading(false)
   }
 
-  useEffect(() => { fetchOpportunities() }, [search, filterType, filterField, filterGrade, filterCost, filterLocation])
+  useEffect(() => { fetchOpportunities() }, [search, filterType, filterField, filterGrade, filterCost, filterLocation, filterOpenOnly])
 
   const deadlineSoon = (d: string | null) => {
     if (!d) return false
     const diff = (new Date(d).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
     return diff >= 0 && diff <= 30
   }
+
+  const deadlinePassed = (d: string | null) => {
+    if (!d) return false
+    return new Date(d).getTime() < Date.now()
+  }
+
+  const hasActiveFilters = filterType || filterField || filterGrade || filterCost || filterLocation || filterOpenOnly || search
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
@@ -80,8 +96,22 @@ export default function HomePage() {
               {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           ))}
-          {(filterType||filterField||filterGrade||filterCost||filterLocation||search) && (
-            <button onClick={() => { setFilterType(''); setFilterField(''); setFilterGrade(''); setFilterCost(''); setFilterLocation(''); setSearch('') }}
+
+          {/* 只看开放中 toggle */}
+          <button
+            onClick={() => setFilterOpenOnly(v => !v)}
+            style={{
+              padding: '8px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500,
+              border: filterOpenOnly ? '1px solid #27ae60' : '1px solid #e0e0e0',
+              background: filterOpenOnly ? '#eafaf1' : 'white',
+              color: filterOpenOnly ? '#27ae60' : '#666',
+              transition: 'all 0.15s'
+            }}>
+            {filterOpenOnly ? '✅ Open Only' : '📅 Open Only'}
+          </button>
+
+          {hasActiveFilters && (
+            <button onClick={() => { setFilterType(''); setFilterField(''); setFilterGrade(''); setFilterCost(''); setFilterLocation(''); setFilterOpenOnly(false); setSearch('') }}
               style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ffcccc', background: '#fff5f5', color: '#e74c3c', fontSize: 13, cursor: 'pointer' }}>✕ Clear</button>
           )}
           <span style={{ marginLeft: 'auto', fontSize: 13, color: '#999' }}>{opportunities.length} results</span>
@@ -99,7 +129,13 @@ export default function HomePage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
             {opportunities.map(opp => (
               <div key={opp.id} onClick={() => setSelected(opp)}
-                style={{ background: 'white', borderRadius: 12, padding: 20, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', cursor: 'pointer', border: '1px solid #f0f0f0', transition: 'all 0.15s' }}
+                style={{
+                  background: 'white', borderRadius: 12, padding: 20,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)', cursor: 'pointer',
+                  border: deadlinePassed(opp.deadline) ? '1px solid #f0e0e0' : '1px solid #f0f0f0',
+                  opacity: deadlinePassed(opp.deadline) ? 0.75 : 1,
+                  transition: 'all 0.15s'
+                }}
                 onMouseEnter={e => { const d = e.currentTarget as HTMLDivElement; d.style.transform='translateY(-2px)'; d.style.boxShadow='0 8px 24px rgba(0,0,0,0.12)' }}
                 onMouseLeave={e => { const d = e.currentTarget as HTMLDivElement; d.style.transform=''; d.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -115,9 +151,15 @@ export default function HomePage() {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#888' }}>
                   <span>📍 {LOCATION_LABELS[opp.location_type]}</span>
-                  {opp.deadline && <span style={{ color: deadlineSoon(opp.deadline) ? '#e74c3c' : '#888', fontWeight: deadlineSoon(opp.deadline) ? 600 : 400 }}>
-                    {deadlineSoon(opp.deadline) ? '⚠️ ' : '📅 '}Due {new Date(opp.deadline).toLocaleDateString()}
-                  </span>}
+                  {opp.deadline && (
+                    <span style={{
+                      color: deadlinePassed(opp.deadline) ? '#aaa' : deadlineSoon(opp.deadline) ? '#e74c3c' : '#888',
+                      fontWeight: deadlineSoon(opp.deadline) ? 600 : 400
+                    }}>
+                      {deadlinePassed(opp.deadline) ? '🔒 Closed ' : deadlineSoon(opp.deadline) ? '⚠️ ' : '📅 '}
+                      {deadlinePassed(opp.deadline) ? new Date(opp.deadline).toLocaleDateString() : `Due ${new Date(opp.deadline).toLocaleDateString()}`}
+                    </span>
+                  )}
                 </div>
                 {opp.grade_levels.length > 0 && <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>Grades: {opp.grade_levels.map(g=>`${g}th`).join(', ')}</div>}
               </div>
@@ -135,6 +177,11 @@ export default function HomePage() {
             </div>
             <h2 style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 700, color: '#1a1a2e' }}>{selected.title}</h2>
             {selected.organization && <p style={{ margin: '0 0 16px', color: '#666' }}>🏛 {selected.organization}</p>}
+            {deadlinePassed(selected.deadline) && (
+              <div style={{ background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#b26a00' }}>
+                ⚠️ This opportunity's deadline has passed. Check the official website for updated dates.
+              </div>
+            )}
             <p style={{ color: '#444', lineHeight: 1.7, marginBottom: 20 }}>{selected.description}</p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
               {[
