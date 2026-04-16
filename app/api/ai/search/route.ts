@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-server'
 import { verifyAdmin } from '@/lib/auth'
 
 const TARGET_QUERY_COUNT = 6

@@ -73,7 +73,8 @@ export default function AdminPage() {
       setLoading(false)
       return
     }
-    let url = `/api/opportunities?status=${statusMap[tab]}`
+    // ✅ 改为 admin 专用路由
+    let url = `/api/admin/opportunities?status=${statusMap[tab]}`
     if (tab === 'review') url += '&verification=needs_review'
     const res = await fetch(url, { headers: authHeaders() })
     const data = await res.json()
@@ -157,7 +158,7 @@ export default function AdminPage() {
   }
 
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 4000) }
-
+  
   if (!token) return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1a1a2e, #0f3460)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
       <div style={{ background: 'white', borderRadius: 16, padding: 40, width: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
@@ -185,7 +186,6 @@ export default function AdminPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0f2f5', fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
-      {/* Header */}
       <div style={{ background: '#1a1a2e', color: 'white', padding: '0 24px' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -209,7 +209,6 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div style={{ background: 'white', borderBottom: '1px solid #e0e0e0', padding: '0 24px' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', gap: 4 }}>
           {tabConfig.map(t => (
@@ -222,7 +221,6 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* Toast */}
       {msg && (
         <div style={{ position: 'fixed', top: 80, right: 24, background: '#1a1a2e', color: 'white', padding: '12px 20px', borderRadius: 10, zIndex: 9999, fontSize: 14, fontWeight: 600, maxWidth: 320 }}>
           {msg}
@@ -230,7 +228,6 @@ export default function AdminPage() {
       )}
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: 24 }}>
-        {/* Keywords tab */}
         {tab === 'keywords' && (
           <div>
             <div style={{ background: 'white', borderRadius: 12, padding: 20, marginBottom: 20, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
@@ -263,14 +260,11 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Opportunities list */}
         {tab !== 'keywords' && (
           loading ? <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>Loading...</div> :
           opportunities.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 60, background: 'white', borderRadius: 12, color: '#999' }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>
-                {tab === 'new' ? '📭' : tab === 'review' ? '✅' : '📋'}
-              </div>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>{tab === 'new' ? '📭' : tab === 'review' ? '✅' : '📋'}</div>
               <div style={{ fontSize: 18, fontWeight: 600 }}>
                 {tab === 'new' ? 'No pending reviews' : tab === 'review' ? 'No issues found' : 'Nothing here yet'}
               </div>
@@ -307,8 +301,6 @@ export default function AdminPage() {
                         </div>
                       )}
                     </div>
-
-                    {/* Action buttons */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 140 }}>
                       {tab === 'new' && <>
                         <button onClick={() => updateStatus(opp.id, 'published')}
@@ -351,7 +343,6 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* Edit Modal */}
       {editing && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
           <div style={{ background: 'white', borderRadius: 16, maxWidth: 700, width: '100%', maxHeight: '90vh', overflow: 'auto', padding: 32 }}>
@@ -365,6 +356,8 @@ export default function AdminPage() {
                 { label: 'Organization', key: 'organization', type: 'text' },
                 { label: 'Website URL', key: 'website_url', type: 'text' },
                 { label: 'Deadline (YYYY-MM-DD)', key: 'deadline', type: 'text' },
+                { label: 'Start Date (YYYY-MM-DD)', key: 'start_date', type: 'text' },
+                { label: 'End Date (YYYY-MM-DD)', key: 'end_date', type: 'text' },
                 { label: 'Duration', key: 'duration', type: 'text' },
                 { label: 'Location', key: 'location', type: 'text' },
                 { label: 'Cost Amount', key: 'cost_amount', type: 'text' },
@@ -450,4 +443,4 @@ export default function AdminPage() {
       )}
     </div>
   )
-}
+}zhe ya
