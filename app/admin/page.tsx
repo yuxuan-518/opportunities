@@ -285,7 +285,7 @@ export default function AdminPage() {
                       {opp.organization && <p style={{ margin: '0 0 8px', fontSize: 13, color: '#666' }}>🏛 {opp.organization}</p>}
                       <p style={{ margin: '0 0 8px', fontSize: 13, color: '#555', lineHeight: 1.5 }}>{opp.description}</p>
                       <div style={{ display: 'flex', gap: 16, fontSize: 12, color: '#888', flexWrap: 'wrap' }}>
-                        {opp.deadline && <span>📅 Deadline: {new Date(opp.deadline).toLocaleDateString()}</span>}
+                        {opp.deadline && <span>📅 Deadline: {new Date(opp.deadline + 'T12:00:00').toLocaleDateString()}</span>}
                         {opp.website_url && <a href={opp.website_url} target="_blank" rel="noopener noreferrer" style={{ color: '#3498db' }}>🔗 Website</a>}
                         {opp.fields.length > 0 && <span>🏷 {opp.fields.join(', ')}</span>}
                         {opp.grade_levels.length > 0 && <span>👤 Grades: {opp.grade_levels.join(', ')}</span>}
