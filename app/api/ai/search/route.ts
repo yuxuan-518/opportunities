@@ -73,6 +73,7 @@ Rules:
 - Must clearly accept high school students
 - Must have a real working URL
 - If unsure about eligibility, skip it
+- "Rising" students (e.g. "rising 12th graders") means they are currently one grade below — a rising 12th grader is currently in 11th grade
 - Return fewer than 3 if needed — never fabricate
 
 Return ONLY a JSON array. Each object:
