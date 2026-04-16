@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
   if (field) query = query.contains('fields', [field])
   if (grade) query = query.contains('grade_levels', [grade])
   if (cost) query = query.eq('cost', cost)
-  if (search) query = query.ilike('title', `%${search}%`)
+  if (search) query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,organization.ilike.%${search}%`)
 
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
