@@ -125,9 +125,9 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-  const timer = setTimeout(() => { fetchOpportunities() }, 300)
-  return () => clearTimeout(timer)
-}, [search, filterType, filterField, filterGrade, filterCost, filterLocation, filterOpenOnly])
+    const timer = setTimeout(() => { fetchOpportunities() }, 300)
+    return () => clearTimeout(timer)
+  }, [search, filterType, filterField, filterGrade, filterCost, filterLocation, filterState, filterOpenOnly])
 
   const deadlineSoon = (d: string | null) => {
     if (!d) return false
@@ -250,7 +250,31 @@ export default function HomePage() {
             <option value="MS">Mississippi</option>
             <option value="MO">Missouri</option>
             <option value="MT">Montana</option>
-            <option
+            <option value="NE">Nebraska</option>
+            <option value="NV">Nevada</option>
+            <option value="NH">New Hampshire</option>
+            <option value="NJ">New Jersey</option>
+            <option value="NM">New Mexico</option>
+            <option value="NY">New York</option>
+            <option value="NC">North Carolina</option>
+            <option value="ND">North Dakota</option>
+            <option value="OH">Ohio</option>
+            <option value="OK">Oklahoma</option>
+            <option value="OR">Oregon</option>
+            <option value="PA">Pennsylvania</option>
+            <option value="RI">Rhode Island</option>
+            <option value="SC">South Carolina</option>
+            <option value="SD">South Dakota</option>
+            <option value="TN">Tennessee</option>
+            <option value="TX">Texas</option>
+            <option value="UT">Utah</option>
+            <option value="VT">Vermont</option>
+            <option value="VA">Virginia</option>
+            <option value="WA">Washington</option>
+            <option value="WV">West Virginia</option>
+            <option value="WI">Wisconsin</option>
+            <option value="WY">Wyoming</option>
+          </select>
           <button onClick={() => setFilterOpenOnly(v => !v)}
             style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500,
               border: filterOpenOnly ? '1px solid #27ae60' : '1px solid #e0e0e0',
@@ -258,7 +282,7 @@ export default function HomePage() {
             {filterOpenOnly ? t.openOnlyActive : `📅 ${t.openOnly}`}
           </button>
           {hasActiveFilters && (
-            <button onClick={() => { setFilterType(''); setFilterField(''); setFilterGrade(''); setFilterCost(''); setFilterLocation(''); setFilterOpenOnly(false); setSearch('') }}
+            <button onClick={() => { setFilterType(''); setFilterField(''); setFilterGrade(''); setFilterCost(''); setFilterLocation(''); setFilterState(''); setFilterOpenOnly(false); setSearch('') }}
               style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ffcccc', background: '#fff5f5', color: '#e74c3c', fontSize: 13, cursor: 'pointer' }}>
               {t.clear}
             </button>
@@ -316,7 +340,6 @@ export default function HomePage() {
               ))}
             </div>
 
-            {/* 分页 Show More 按钮 */}
             {hasMore && (
               <div style={{ textAlign: 'center', marginTop: 32 }}>
                 <div style={{ fontSize: 13, color: '#999', marginBottom: 12 }}>
