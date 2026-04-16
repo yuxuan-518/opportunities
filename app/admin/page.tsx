@@ -18,6 +18,19 @@ const EMPTY_OPP: Partial<Opportunity> = {
   fields: [], grade_levels: [], admin_notes: ''
 }
 
+const US_STATES = [
+  ['AL','Alabama'],['AK','Alaska'],['AZ','Arizona'],['AR','Arkansas'],['CA','California'],
+  ['CO','Colorado'],['CT','Connecticut'],['DE','Delaware'],['FL','Florida'],['GA','Georgia'],
+  ['HI','Hawaii'],['ID','Idaho'],['IL','Illinois'],['IN','Indiana'],['IA','Iowa'],
+  ['KS','Kansas'],['KY','Kentucky'],['LA','Louisiana'],['ME','Maine'],['MD','Maryland'],
+  ['MA','Massachusetts'],['MI','Michigan'],['MN','Minnesota'],['MS','Mississippi'],['MO','Missouri'],
+  ['MT','Montana'],['NE','Nebraska'],['NV','Nevada'],['NH','New Hampshire'],['NJ','New Jersey'],
+  ['NM','New Mexico'],['NY','New York'],['NC','North Carolina'],['ND','North Dakota'],['OH','Ohio'],
+  ['OK','Oklahoma'],['OR','Oregon'],['PA','Pennsylvania'],['RI','Rhode Island'],['SC','South Carolina'],
+  ['SD','South Dakota'],['TN','Tennessee'],['TX','Texas'],['UT','Utah'],['VT','Vermont'],
+  ['VA','Virginia'],['WA','Washington'],['WV','West Virginia'],['WI','Wisconsin'],['WY','Wyoming'],
+]
+
 export default function AdminPage() {
   const [loggedIn, setLoggedIn] = useState(false)
   const [admin, setAdmin] = useState<{ username: string; display_name: string } | null>(null)
@@ -35,6 +48,11 @@ export default function AdminPage() {
   const [keywords, setKeywords] = useState<{ id: string; keyword: string; category: string; active: boolean }[]>([])
   const [newKeyword, setNewKeyword] = useState('')
   const [newKeywordCat, setNewKeywordCat] = useState('general')
+
+  // AI Search modal state
+  const [showAiModal, setShowAiModal] = useState(false)
+  const [aiSearchState, setAiSearchState] = useState('')
+  const [aiSearchFields, setAiSearchFields] = useState<string[]>([])
 
   useEffect(() => {
     const a = localStorage.getItem('admin_info')
@@ -134,9 +152,24 @@ export default function AdminPage() {
     fetchOpportunities()
   }
 
+  const openAiSearchModal = () => {
+    setAiSearchState('')
+    setAiSearchFields([])
+    setShowAiModal(true)
+  }
+
   const aiSearch = async () => {
+    setShowAiModal(false)
     setAiSearching(true)
-    const res = await fetch('/api/ai/search', { method: 'POST', credentials: 'include' })
+    const body: Record<string, any> = {}
+    if (aiSearchState) body.state = aiSearchState
+    if (aiSearchFields.length > 0) body.fields = aiSearchFields
+    const res = await fetch('/api/ai/search', {
+      method: 'POST',
+      headers: jsonHeaders(),
+      credentials: 'include',
+      body: JSON.stringify(body)
+    })
     const data = await res.json()
     setAiSearching(false)
     if (data.found !== undefined) {
@@ -168,9 +201,12 @@ export default function AdminPage() {
     fetchOpportunities()
   }
 
+  const toggleAiField = (f: string) => {
+    setAiSearchFields(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])
+  }
+
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 4000) }
 
-  // 复用的表单字段组件
   const renderFormFields = (data: Partial<Opportunity>, onChange: (key: string, val: any) => void) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {[
@@ -292,7 +328,7 @@ export default function AdminPage() {
               style={{ padding: '8px 14px', background: '#9b59b6', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
               ➕ Add Manually
             </button>
-            <button onClick={aiSearch} disabled={aiSearching}
+            <button onClick={openAiSearchModal} disabled={aiSearching}
               style={{ padding: '8px 14px', background: aiSearching ? '#555' : '#2ecc71', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, cursor: aiSearching ? 'default' : 'pointer', fontWeight: 600 }}>
               {aiSearching ? '🤖 Searching...' : '🤖 AI Search'}
             </button>
@@ -440,10 +476,61 @@ export default function AdminPage() {
         )}
       </div>
 
+      {/* AI Search Modal */}
+      {showAiModal && (
+        <div onClick={() => setShowAiModal(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: 16, maxWidth: 560, width: '100%', padding: 32, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>🤖 AI Search Parameters</h2>
+              <button onClick={() => setShowAiModal(false)} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#666' }}>×</button>
+            </div>
+            <p style={{ margin: '0 0 20px', fontSize: 13, color: '#888' }}>Leave blank to search broadly. Selecting a state or fields will focus the search on matching opportunities.</p>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 12, color: '#666', fontWeight: 600, display: 'block', marginBottom: 8, textTransform: 'uppercase' }}>State (optional)</label>
+              <select value={aiSearchState} onChange={e => setAiSearchState(e.target.value)}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, outline: 'none' }}>
+                <option value="">Any State (nationwide)</option>
+                {US_STATES.map(([code, name]) => (
+                  <option key={code} value={code}>{name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 28 }}>
+              <label style={{ fontSize: 12, color: '#666', fontWeight: 600, display: 'block', marginBottom: 8, textTransform: 'uppercase' }}>
+                Fields (optional) {aiSearchFields.length > 0 && <span style={{ color: '#3498db', marginLeft: 6 }}>{aiSearchFields.length} selected</span>}
+              </label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {FIELDS.map(f => (
+                  <button key={f} onClick={() => toggleAiField(f)}
+                    style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid #ddd', fontSize: 12, cursor: 'pointer',
+                      background: aiSearchFields.includes(f) ? '#3498db' : 'white',
+                      color: aiSearchFields.includes(f) ? 'white' : '#666' }}>
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={aiSearch}
+                style={{ flex: 1, padding: 13, background: '#2ecc71', color: 'white', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>
+                🤖 Start Search
+              </button>
+              <button onClick={() => setShowAiModal(false)}
+                style={{ padding: '13px 20px', background: '#f5f5f5', color: '#666', border: 'none', borderRadius: 10, fontSize: 15, cursor: 'pointer' }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Modal */}
       {editing && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div style={{ background: 'white', borderRadius: 16, maxWidth: 700, width: '100%', maxHeight: '90vh', overflow: 'auto', padding: 32 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: 16, maxWidth: 700, width: '100%', maxHeight: '90vh', overflow: 'auto', padding: 32 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
               <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Edit Opportunity</h2>
               <button onClick={() => setEditing(null)} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#666' }}>×</button>
@@ -460,7 +547,7 @@ export default function AdminPage() {
       {/* Add Manually Modal */}
       {adding && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div style={{ background: 'white', borderRadius: 16, maxWidth: 700, width: '100%', maxHeight: '90vh', overflow: 'auto', padding: 32 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'white', borderRadius: 16, maxWidth: 700, width: '100%', maxHeight: '90vh', overflow: 'auto', padding: 32 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
               <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>➕ Add Opportunity Manually</h2>
               <button onClick={() => setAdding(null)} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#666' }}>×</button>
