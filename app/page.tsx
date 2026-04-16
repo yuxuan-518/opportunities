@@ -122,7 +122,10 @@ export default function HomePage() {
     setLoading(false)
   }
 
-  useEffect(() => { fetchOpportunities() }, [search, filterType, filterField, filterGrade, filterCost, filterLocation, filterOpenOnly])
+  useEffect(() => {
+  const timer = setTimeout(() => { fetchOpportunities() }, 300)
+  return () => clearTimeout(timer)
+}, [search, filterType, filterField, filterGrade, filterCost, filterLocation, filterOpenOnly])
 
   const deadlineSoon = (d: string | null) => {
     if (!d) return false
