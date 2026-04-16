@@ -284,4 +284,6 @@ Return ONLY a raw JSON array (no markdown, no explanation) where each object has
       .update({ status: 'failed', completed_at: new Date().toISOString() })
       .eq('id', log?.id)
     const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error:
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
