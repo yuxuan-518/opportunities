@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
   const grade = searchParams.get('grade')
   const cost = searchParams.get('cost')
   const search = searchParams.get('search')
+  const filterLocation = searchParams.get('location')
   const isAdmin = verifyAdmin(req)
 
   let query = (isAdmin ? supabaseAdmin : supabase)
@@ -29,6 +30,7 @@ export async function GET(req: NextRequest) {
   if (grade) query = query.contains('grade_levels', [grade])
   if (cost) query = query.eq('cost', cost)
   if (search) query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,organization.ilike.%${search}%`)
+  if (filterLocation) query = query.eq('location_type', filterLocation)
 
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
