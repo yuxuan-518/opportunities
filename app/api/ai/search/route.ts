@@ -59,7 +59,41 @@ async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-async function callClaudeWithRetry(query: string): Promise<{ data: any, rateLimited: boolean, timedOut: boolean }> {
+function buildPrompt(query: string, stateCode: string | null, stateName: string | null): string {
+  const locationRule = stateCode && stateName
+    ? `CRITICAL: Only return opportunities that are PHYSICALLY LOCATED in ${stateName} (state code: ${stateCode}). Do NOT include nationwide programs, online-only programs, or programs in other states. The "state" field MUST be "${stateCode}". If you cannot find enough ${stateName}-specific opportunities, return fewer results — never include non-${stateName} programs to fill the quota.`
+    : `Include both nationwide and location-specific opportunities. For online programs, set "state" to null.`
+
+  return `Find 2–3 real extracurricular opportunities for U.S. high school students (grades 9–12) related to: "${query}"
+
+${locationRule}
+
+Rules:
+- Only official program/competition/scholarship pages
+- Must clearly accept high school students
+- Must have a real working URL
+- If unsure about eligibility, skip it
+- "Rising" students (e.g. "rising 12th graders") means they are currently one grade below — a rising 12th grader is currently in 11th grade
+- Return fewer than 3 if needed — never fabricate
+
+Return ONLY a JSON array. Each object:
+{
+  "title": "exact official name",
+  "organization": "official org name",
+  "website_url": "direct official URL",
+  "type": "competition|program|internship|scholarship|volunteer|research|workshop|other",
+  "grade_levels": ["9","10","11","12"],
+  "location_type": "${stateCode ? 'in_person|hybrid' : 'online|in_person|hybrid'}",
+  "location": "${stateCode ? `city, ${stateName}` : 'city, state or null'}",
+  "state": "${stateCode ? stateCode : '2-letter state code or null if online/nationwide'}",
+  "short_description": "1-2 sentences",
+  "search_keywords": ["${query}"]
+}
+
+No markdown, no explanation. JSON array only.`
+}
+
+async function callClaudeWithRetry(query: string, stateCode: string | null, stateName: string | null): Promise<{ data: any, rateLimited: boolean, timedOut: boolean }> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), PER_QUERY_TIMEOUT_MS)
@@ -79,31 +113,7 @@ async function callClaudeWithRetry(query: string): Promise<{ data: any, rateLimi
           tools: [{ type: 'web_search_20250305', name: 'web_search' }],
           messages: [{
             role: 'user',
-            content: `Find 2–3 real extracurricular opportunities for U.S. high school students (grades 9–12) related to: "${query}"
-
-Rules:
-- Only official program/competition/scholarship pages
-- Must clearly accept high school students
-- Must have a real working URL
-- If unsure about eligibility, skip it
-- "Rising" students (e.g. "rising 12th graders") means they are currently one grade below — a rising 12th grader is currently in 11th grade
-- Return fewer than 3 if needed — never fabricate
-
-Return ONLY a JSON array. Each object:
-{
-  "title": "exact official name",
-  "organization": "official org name",
-  "website_url": "direct official URL",
-  "type": "competition|program|internship|scholarship|volunteer|research|workshop|other",
-  "grade_levels": ["9","10","11","12"],
-  "location_type": "online|in_person|hybrid",
-  "location": "city, state or null",
-  "state": "2-letter state code (e.g. NY, CA, TX) or null if online/international",
-  "short_description": "1-2 sentences",
-  "search_keywords": ["${query}"]
-}
-
-No markdown, no explanation. JSON array only.`
+            content: buildPrompt(query, stateCode, stateName)
           }]
         })
       })
@@ -135,13 +145,13 @@ No markdown, no explanation. JSON array only.`
   return { data: null, rateLimited: true, timedOut: false }
 }
 
-async function fetchClaudeResultsForQuery(query: string): Promise<{
+async function fetchClaudeResultsForQuery(query: string, stateCode: string | null, stateName: string | null): Promise<{
   results: any[]
   success: boolean
   timedOut: boolean
   rateLimited: boolean
 }> {
-  const { data: claudeData, rateLimited, timedOut } = await callClaudeWithRetry(query)
+  const { data: claudeData, rateLimited, timedOut } = await callClaudeWithRetry(query, stateCode, stateName)
 
   if (!claudeData) return { results: [], success: false, timedOut, rateLimited }
   if (claudeData.error) {
@@ -162,7 +172,13 @@ async function fetchClaudeResultsForQuery(query: string): Promise<{
 
   try {
     const parsed = JSON.parse(jsonText.slice(startIdx, endIdx + 1))
-    const valid = Array.isArray(parsed) ? parsed.filter(isValidOpportunity) : []
+    let valid = Array.isArray(parsed) ? parsed.filter(isValidOpportunity) : []
+
+    // 如果指定了州，过滤掉 state 不匹配的结果
+    if (stateCode) {
+      valid = valid.filter((opp: any) => opp.state === stateCode)
+    }
+
     return { results: valid, success: true, timedOut: false, rateLimited: false }
   } catch {
     return { results: [], success: false, timedOut: false, rateLimited: false }
@@ -201,7 +217,7 @@ function buildQuery(
     case 0: return `${institution || ''} ${field || ''} ${type || ''} high school students`.trim()
     case 1: return `${location || ''} ${field || ''} ${type || ''} high school`.trim()
     case 2: return `${institution || ''} ${location || ''} ${type || ''} high school program`.trim()
-    case 3: return `${field || ''} ${type || ''} high school students nationwide`.trim()
+    case 3: return `${field || ''} ${type || ''} high school students`.trim()
     default: return `${field || ''} ${type || ''} high school`.trim()
   }
 }
@@ -212,7 +228,6 @@ export async function POST(req: NextRequest) {
   const admin = verifyAdmin(req)
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  // 读取可选的搜索参数
   let bodyState: string | null = null
   let bodyFields: string[] | null = null
   try {
@@ -221,7 +236,6 @@ export async function POST(req: NextRequest) {
     bodyFields = body.fields?.length > 0 ? body.fields : null
   } catch { /* body 为空时忽略 */ }
 
-  // 把州代码转成全名用于 query 构建
   const stateFullName = bodyState
     ? US_STATES.find(([code]) => code === bodyState)?.[1] || null
     : null
@@ -252,14 +266,10 @@ export async function POST(req: NextRequest) {
     while (searchQueries.length < TARGET_QUERY_COUNT && attempts < TARGET_QUERY_COUNT * 5) {
       attempts++
       const inst = Math.random() > 0.3 ? randomPick(instList) : null
-      // 如果指定了州，优先用该州全名作为 location
       const loc = stateFullName
         ? stateFullName
         : (Math.random() > 0.4 ? randomPick(locList) : null)
-      // 如果指定了 fields，从中随机选；否则从 dim_fields 随机选
-      const field = bodyFields
-        ? randomPick(bodyFields)
-        : randomPick(fieldList)
+      const field = bodyFields ? randomPick(bodyFields) : randomPick(fieldList)
       const type = randomPick(typeList)
       const q = buildQuery(inst, loc, field, type)
       if (!used.has(q)) {
@@ -289,7 +299,7 @@ export async function POST(req: NextRequest) {
       searchQueries,
       CONCURRENCY_LIMIT,
       async (query) => {
-        const { results, success, timedOut, rateLimited } = await fetchClaudeResultsForQuery(query)
+        const { results, success, timedOut, rateLimited } = await fetchClaudeResultsForQuery(query, bodyState, stateFullName)
         if (timedOut) queriesTimedOut++
         else if (rateLimited) queriesRateLimited++
         else if (success) queriesSucceeded++
