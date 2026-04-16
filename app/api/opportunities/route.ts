@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
   const cost = searchParams.get('cost')
   const search = searchParams.get('search')
   const filterLocation = searchParams.get('location')
+  const state = searchParams.get('state')
   const isAdmin = verifyAdmin(req)
 
   let query = (isAdmin ? supabaseAdmin : supabase)
@@ -31,6 +32,7 @@ export async function GET(req: NextRequest) {
   if (cost) query = query.eq('cost', cost)
   if (search) query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,organization.ilike.%${search}%`)
   if (filterLocation) query = query.eq('location_type', filterLocation)
+  if (state) query = query.eq('state', state)
 
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

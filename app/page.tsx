@@ -92,6 +92,7 @@ export default function HomePage() {
   const [filterGrade, setFilterGrade] = useState('')
   const [filterCost, setFilterCost] = useState('')
   const [filterLocation, setFilterLocation] = useState('')
+  const [filterState, setFilterState] = useState('')
   const [filterOpenOnly, setFilterOpenOnly] = useState(false)
   const [selected, setSelected] = useState<Opportunity | null>(null)
   const [lang, setLang] = useState<Lang>('en')
@@ -107,6 +108,7 @@ export default function HomePage() {
     if (filterGrade) params.set('grade', filterGrade)
     if (filterCost) params.set('cost', filterCost)
     if (filterLocation) params.set('location', filterLocation)
+    if (filterState) params.set('state', filterState)
     const res = await fetch('/api/opportunities?' + params)
     const data = await res.json()
     let filtered = Array.isArray(data) ? data : []
@@ -147,7 +149,7 @@ export default function HomePage() {
     lang === 'zh' ? 'zh-CN' : lang === 'es' ? 'es-ES' : 'en-US'
   )
 
-  const hasActiveFilters = filterType || filterField || filterGrade || filterCost || filterLocation || filterOpenOnly || search
+  const hasActiveFilters = filterType || filterField || filterGrade || filterCost || filterLocation || filterState || filterOpenOnly || search
   const visibleOpportunities = opportunities.slice(0, page * PAGE_SIZE)
   const hasMore = visibleOpportunities.length < opportunities.length
 
@@ -219,6 +221,36 @@ export default function HomePage() {
             <option value="in_person">{t.inPerson}</option>
             <option value="hybrid">{t.hybrid}</option>
           </select>
+          <select value={filterState} onChange={e => setFilterState(e.target.value)}
+            style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e0e0e0', fontSize: 13, background: filterState ? '#e8f4fd' : 'white', cursor: 'pointer', outline: 'none' }}>
+            <option value="">All States</option>
+            <option value="AL">Alabama</option>
+            <option value="AK">Alaska</option>
+            <option value="AZ">Arizona</option>
+            <option value="AR">Arkansas</option>
+            <option value="CA">California</option>
+            <option value="CO">Colorado</option>
+            <option value="CT">Connecticut</option>
+            <option value="DE">Delaware</option>
+            <option value="FL">Florida</option>
+            <option value="GA">Georgia</option>
+            <option value="HI">Hawaii</option>
+            <option value="ID">Idaho</option>
+            <option value="IL">Illinois</option>
+            <option value="IN">Indiana</option>
+            <option value="IA">Iowa</option>
+            <option value="KS">Kansas</option>
+            <option value="KY">Kentucky</option>
+            <option value="LA">Louisiana</option>
+            <option value="ME">Maine</option>
+            <option value="MD">Maryland</option>
+            <option value="MA">Massachusetts</option>
+            <option value="MI">Michigan</option>
+            <option value="MN">Minnesota</option>
+            <option value="MS">Mississippi</option>
+            <option value="MO">Missouri</option>
+            <option value="MT">Montana</option>
+            <option
           <button onClick={() => setFilterOpenOnly(v => !v)}
             style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500,
               border: filterOpenOnly ? '1px solid #27ae60' : '1px solid #e0e0e0',

@@ -85,6 +85,7 @@ Return ONLY a JSON array. Each object:
   "grade_levels": ["9","10","11","12"],
   "location_type": "online|in_person|hybrid",
   "location": "city, state or null",
+  "state": "2-letter state code (e.g. NY, CA, TX) or null if online/international",
   "short_description": "1-2 sentences",
   "search_keywords": ["${query}"]
 }
@@ -301,6 +302,7 @@ export async function POST(req: NextRequest) {
         grade_levels: opp.grade_levels,
         location_type: opp.location_type,
         location: opp.location || null,
+        state: opp.state || null,
         description: opp.short_description || '',
         fields: opp.fields || [],
         cost: opp.cost || 'free',

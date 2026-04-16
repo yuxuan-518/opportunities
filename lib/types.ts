@@ -53,6 +53,7 @@ export interface Opportunity {
   cost_amount: string | null
   location_type: LocationType
   location: string | null
+  state: string | null
   requirements: string | null
   deadline: string | null
   start_date: string | null
